@@ -2,7 +2,7 @@ from dnslib.server import DNSServer, BaseResolver
 from dnslib import DNSRecord, QTYPE
 from dnslib import RR, A
 import time
-from model_setting import DomainClassifier
+from SURF_AI_model.model_setting import DomainClassifier
 
 BLOCK_IP = "127.0.0.1"
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     resolver = SimpleResolver()
     server = DNSServer(resolver, port=53, address="0.0.0.0")
 
-    print("🚀 DNS server running on port 10053")
+    print("🚀 DNS server running on port 53")
     server.start_thread()
 
     while True:
