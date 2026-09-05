@@ -245,6 +245,17 @@ def operate(id, event, qstate, qdata):
 
             R_CONN.setex(f"block_mark:{client_ip}:{predict_name}", 300, str(s_per))
 
+            # 도메인 단위로도 짧게 남긴다.
+            #
+            # 클라이언트를 어느 이름으로 보는지가 경로마다 다르다. DoH 로 들어오면
+            # 토큰이지만 53 에 직접 붙으면 IP 다. 그런데 확장이 /check 를 호출할 때
+            # 터널을 지나면 그 IP 가 사라져서, 53 직결로 막힌 기기는 자기 기록을
+            # 찾지 못한다. 그 간극을 메우는 자리다.
+            #
+            # 판정은 도메인만 보고 하므로 같은 도메인이면 누구에게나 같은 결과다.
+            # 창을 60초로 좁혀 두어 오래된 판정이 남지 않게 한다.
+            R_CONN.setex(f"block_recent:{predict_name}", 60, str(s_per))
+
             log_info(f"🚨 [SURF BLOCKED] {qname}")
             
             msg = DNSMessage(full_qname, RR_TYPE_A, RR_CLASS_IN, PKT_QR | PKT_AA | PKT_RA)
