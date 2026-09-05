@@ -12,7 +12,11 @@
 
 import os
 
-bind = f"127.0.0.1:{os.getenv('DOH_PORT', '8053')}"
+# 0.0.0.0 으로 여는 이유가 있다. 이 프로세스는 unbound 의 네트워크 네임스페이스를
+# 공유하는데, cloudflared 와 prometheus 는 각자 다른 컨테이너에 있다. 127.0.0.1 에만
+# 붙이면 그 둘이 닿지 못해 DoH 경로와 지표 수집이 통째로 죽는다.
+# 호스트로는 포트를 내보내지 않으므로 도커 네트워크 안에서만 보인다.
+bind = f"0.0.0.0:{os.getenv('DOH_PORT', '8053')}"
 workers = int(os.getenv('DOH_WORKERS', '1'))
 threads = int(os.getenv('DOH_THREADS', '16'))
 worker_class = 'gthread'
