@@ -6,12 +6,15 @@ load_dotenv()
 import os
 import sys
 
+# 환경변수가 비어 있으면 sys.path 에 None 이 들어간다. 그러면 나중에
+# importlib.metadata 가 경로를 stat 하다가 TypeError 로 죽는데, 파이썬 모듈이
+# 로드되지 않아 unbound 자체가 기동하지 못한다.
 VENV_PATH = os.getenv('VENV_PATH')
-if VENV_PATH not in sys.path:
+if VENV_PATH and VENV_PATH not in sys.path:
     sys.path.insert(0, VENV_PATH)
 
 PROJECT_ROOT = os.getenv('PROJECT_ROOT')
-if PROJECT_ROOT not in sys.path:
+if PROJECT_ROOT and PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from prometheus_client import Counter, Histogram, Gauge, start_http_server
