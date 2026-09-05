@@ -125,7 +125,18 @@ def is_truncated(msg):
 # ---------------------------------------------------------------- 라우트
 
 @app.route('/dns-query', methods=['GET', 'POST'])
-def dns_query():
+@app.route('/dns-query/<path:path_token>', methods=['GET', 'POST'])
+def dns_query(path_token=None):
+    """RFC 8484 종단.
+
+    토큰을 두 가지 방법으로 받는다.
+
+        /dns-query?c=<토큰>        쿼리 문자열
+        /dns-query/<토큰>          경로
+
+    크롬의 보안 DNS 설정은 입력한 주소를 URI 템플릿으로 다루는데, 쿼리 문자열이
+    이미 붙어 있으면 거부하는 경우가 있다. 경로 방식이면 그 문제가 없다.
+    """
     started = time.time()
 
     if request.method == 'POST':
@@ -149,7 +160,7 @@ def dns_query():
         DOH_ERRORS.labels(reason='bad_length').inc()
         return Response('malformed dns message', status=400)
 
-    token = (request.args.get('c') or 'anon').strip()[:64]
+    token = (path_token or request.args.get('c') or 'anon').strip()[:64]
     src_ip = register_token(token)
 
     transport = 'udp'
