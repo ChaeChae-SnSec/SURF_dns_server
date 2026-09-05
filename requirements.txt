@@ -1,0 +1,10 @@
+# Unbound 파이썬 모듈과 DoH 종단이 함께 쓰는 의존성.
+# 모델 추론 의존성은 SURF_AI_model 쪽을 따른다.
+flask>=3.0
+gunicorn>=21.2
+redis>=5.0
+prometheus-client>=0.20
+python-dotenv>=1.0
+
+# tools/check_doh.py 검증용
+dnspython>=2.6

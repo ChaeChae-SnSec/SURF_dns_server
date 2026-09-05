@@ -6,12 +6,15 @@ load_dotenv()
 import os
 import sys
 
+# 환경변수가 비어 있으면 sys.path 에 None 이 들어간다. 그러면 나중에
+# importlib.metadata 가 경로를 stat 하다가 TypeError 로 죽는데, 파이썬 모듈이
+# 로드되지 않아 unbound 자체가 기동하지 못한다.
 VENV_PATH = os.getenv('VENV_PATH')
-if VENV_PATH not in sys.path:
+if VENV_PATH and VENV_PATH not in sys.path:
     sys.path.insert(0, VENV_PATH)
 
 PROJECT_ROOT = os.getenv('PROJECT_ROOT')
-if PROJECT_ROOT not in sys.path:
+if PROJECT_ROOT and PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from prometheus_client import Counter, Histogram, Gauge, start_http_server
@@ -100,6 +103,25 @@ WHITELIST = [
     "mcafee.net"
 ]
 
+def resolve_client_id(client_ip):
+    """클라이언트 식별자를 정한다.
+
+    DoH 를 거쳐 들어온 질의는 소스 주소가 프록시의 루프백 주소다. 프록시가
+    토큰마다 127.x.y.z 를 하나씩 배정하고 tokmap 에 매핑을 남기므로, 여기서
+    되읽어 토큰으로 바꾼다. 그래야 Redis 키가 확장·HTTP 서버와 같은 값으로
+    묶인다. 랩 안에서 직접 붙은 질의는 매핑이 없으니 IP 를 그대로 쓴다.
+    """
+    if not client_ip.startswith("127."):
+        return client_ip
+    try:
+        token = R_CONN.get(f"tokmap:{client_ip}")
+        if token:
+            return token
+    except Exception as e:
+        log_info(f"⚠️ tokmap 조회 실패: {e}")
+    return client_ip
+
+
 def init(id, cfg):
     log_info("SURF AI Filter: DomainClassifier loading...")
     mod_env['model'] = DomainClassifier()
@@ -140,7 +162,9 @@ def operate(id, event, qstate, qdata):
             client_ip = client_ip.replace("::ffff:", "")
         client_ip = client_ip.split(' ')[0].split('@')[0].split('#')[0].strip()
 
-        log_info(f"🔍 [FINAL IP CHECK] Client IP: {client_ip}")
+        client_ip = resolve_client_id(client_ip)
+
+        log_info(f"🔍 [FINAL IP CHECK] Client ID: {client_ip}")
 
         qtype_str = "A" if qstate.qinfo.qtype == RR_TYPE_A else "AAAA"
 
