@@ -192,7 +192,9 @@ def healthz():
     probe = (struct.pack('!HHHHHH', 0x5552, 0x0100, 1, 0, 0, 0)
              + b'\x06google\x03com\x00' + struct.pack('!HH', 1, 1))
     try:
-        answer = forward_udp(probe, synthetic_ip('__healthz__'))
+        # 이름을 등록해 두면 로그에 주소 대신 healthcheck 로 찍힌다. 30초마다 도는
+        # 점검이라, 정체를 알 수 없는 127 주소로 남으면 시연 화면에서 방해가 된다.
+        answer = forward_udp(probe, register_token('healthcheck'))
         ok = len(answer) >= 12
     except Exception as e:
         return jsonify({"status": "degraded", "upstream": str(e)}), 503
