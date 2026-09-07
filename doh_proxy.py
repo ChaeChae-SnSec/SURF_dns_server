@@ -207,8 +207,25 @@ def healthz():
     return jsonify({"status": "ok" if ok else "degraded"}), (200 if ok else 503)
 
 
+def via_tunnel():
+    """이 요청이 인터넷에서 터널을 거쳐 들어왔는지.
+
+    cloudflared 가 원래 클라이언트 정보를 헤더로 붙여준다. 도커 네트워크 안에서
+    직접 부르는 Prometheus 수집에는 이 헤더가 없다.
+    """
+    return bool(request.headers.get('CF-Connecting-IP')
+                or request.headers.get('Cf-Ray'))
+
+
 @app.route('/metrics')
 def metrics():
+    """Prometheus 수집용. 인터넷에는 내보내지 않는다.
+
+    이쪽 지표에는 도메인이나 클라이언트 식별자가 없지만, 운영 규모와 오류 종류가
+    드러난다. 공개할 이유가 없는 것은 닫아 둔다.
+    """
+    if via_tunnel():
+        return jsonify({"error": "not found"}), 404
     return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
 
