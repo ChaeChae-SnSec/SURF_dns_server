@@ -21,6 +21,7 @@ from prometheus_client import Counter, Histogram, Gauge, start_http_server
 from SURF_AI_model.model_setting import DomainClassifier
 import time
 import redis
+import json
 
 # 메트릭 정의
 PRECISION_BUCKETS = (.0005, .001, .002, .005, .01, .025, .05, .075, .1, .25, .5, 1.0, 2.5, 5.0, float("inf"))
@@ -120,6 +121,30 @@ def resolve_client_id(client_ip):
     except Exception as e:
         log_info(f"⚠️ tokmap 조회 실패: {e}")
     return client_ip
+
+
+RECENT_LIST_MAX = 49  # LTRIM 상한. 0부터 세므로 실제로는 50건 보관
+
+
+def push_recent(client_ip, domain, blocked, prob):
+    """최근 판정을 Redis 링버퍼(recent:dns)에 남긴다.
+
+    Grafana의 '최신 DNS 질의' 표가 여기서 읽는다. 화이트리스트로 곧장 통과한
+    질의는 모델이 실제로 판정한 게 아니므로 넣지 않는다 - 대시보드의 '판정 질의'
+    지표와 의미를 맞춘다.
+    """
+    try:
+        entry = json.dumps({
+            "ts": time.time(),
+            "client": client_ip,
+            "domain": domain,
+            "blocked": bool(blocked),
+            "prob": prob,
+        })
+        R_CONN.lpush("recent:dns", entry)
+        R_CONN.ltrim("recent:dns", 0, RECENT_LIST_MAX)
+    except Exception as e:
+        log_info(f"⚠️ recent 기록 실패: {e}")
 
 
 def init(id, cfg):
@@ -234,6 +259,7 @@ def operate(id, event, qstate, qdata):
 
         log_info(f"--- [[DEBUG]] Prediction for {qname}) ===> {pred} ---")
         DNS_QUERIES.labels(client_ip=client_ip, qtype=qtype_str, result=res_label).inc()
+        push_recent(client_ip, qname, pred == 1, max(0.0, s_per))
 
         start_resp = time.time()
         if pred == 1:
