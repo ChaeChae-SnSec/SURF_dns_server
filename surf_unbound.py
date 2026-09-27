@@ -311,7 +311,12 @@ def operate(id, event, qstate, qdata):
             # 만든다. rep.ttl 은 그 뒤에 고쳐봐야 이미 구워진 응답에 뒤늦게
             # 손대는 거라 클라이언트한테 실제로 나가는 값엔 반영되지 않는다.
             # 반드시 set_return_msg 호출 전에 지정해야 한다.
-            msg.default_ttl = 0
+            # 0 대신 5로 준다. 일부 리졸버는 TTL=0을 "수상한 값"으로 보고
+            # 오히려 자기 나름의(더 긴) 방어적 최소 캐싱을 강제하는 경우가
+            # 있다는 보고가 있어, 평범한 작은 양수를 줘서 있는 그대로
+            # 존중받을 가능성을 시험해본다.
+            NEG_CACHE_SECONDS = 5
+            msg.default_ttl = NEG_CACHE_SECONDS
 
             # 근데 default_ttl 만으로는 부족하다. RFC 2308 에 따르면 NXDOMAIN의
             # negative-cache 수명은 AUTHORITY 섹션의 SOA MINIMUM 필드로
@@ -322,10 +327,10 @@ def operate(id, event, qstate, qdata):
             # pfBlockerNG(같은 방식으로 Unbound 파이썬 모듈로 DNS 차단하는
             # 오픈소스 프로젝트)의 실제 구현을 참고했다. MNAME/RNAME은 실제
             # 도메인을 흉내 낼 필요 없이 RFC 2606 예약 도메인(.invalid)을
-            # 쓰면 된다. 마지막 필드(MINIMUM)가 곧 negative-cache 수명이라
-            # 0으로 박아서 이 실패를 거의 기억 못 하게 만든다.
+            # 쓰면 된다. 마지막 필드(MINIMUM)가 곧 negative-cache 수명이다.
             msg.authority.append(
-                f"{full_qname} 0 IN SOA surf.invalid. nobody.invalid. 1 3600 1200 604800 0"
+                f"{full_qname} {NEG_CACHE_SECONDS} IN SOA surf.invalid. nobody.invalid. "
+                f"1 3600 1200 604800 {NEG_CACHE_SECONDS}"
             )
 
             if not msg.set_return_msg(qstate):
@@ -338,7 +343,19 @@ def operate(id, event, qstate, qdata):
                 qstate.return_msg.rep.authoritative = 1 # 이 서버가 최종 권한자임을 명시
                 qstate.return_msg.rep.ttl = 0  # Unbound 자체 캐시용으로도 맞춰둔다
 
-            qstate.return_rcode = RCODE_NXDOMAIN
+                # qstate.return_rcode 를 RCODE_NXDOMAIN 으로 주면 Unbound가
+                # 오류 인코딩 경로를 타면서 AUTHORITY 섹션(=우리가 넣은 SOA)을
+                # 통째로 버린다 - 모듈 안에서는 끝까지 멀쩡히 들고 있다가 실제
+                # 와이어 패킷을 만드는 단계에서만 사라져서, 에러도 안 나고
+                # set_return_msg 도 성공을 반환하니 찾기 어려웠다.
+                #
+                # RCODE는 원래 DNS 헤더 플래그의 하위 4비트다. 그 자리에
+                # 직접 심고 return_rcode 는 NOERROR 로 둬서 정상 인코딩
+                # 경로를 타게 하면, 클라이언트는 플래그에 찍힌 그대로
+                # NXDOMAIN 을 보되 AUTHORITY(SOA)도 같이 받는다.
+                qstate.return_msg.rep.flags |= RCODE_NXDOMAIN
+
+            qstate.return_rcode = RCODE_NOERROR
             qstate.ext_state[id] = MODULE_FINISHED
             return True
 
