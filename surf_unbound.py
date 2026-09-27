@@ -229,6 +229,25 @@ def operate(id, event, qstate, qdata):
                     DNS_QUERIES.labels(client_ip=client_ip, qtype=qtype_str, result="whitelist").inc()
                     qstate.ext_state[id] = MODULE_WAIT_MODULE
                     return True
+
+            recent_bridge = R_CONN.get(f"allow_recent:{predict_name}")
+            if recent_bridge is not None:
+                log_info(f"🟡 [RECENT ALLOW BRIDGE]: {qname}")
+                DNS_QUERIES.labels(client_ip=client_ip, qtype=qtype_str, result="whitelist").inc()
+
+                # 이 값은 "허용" 버튼이 정한 요청 지속시간(초)이다 (0=일회성,
+                # 1800=30분 등). 53 직결 환경에서는 기기별 상태를 서버에
+                # 남겨둘 방법이 없으니, 대신 실제 DNS 응답의 TTL을 그 값으로
+                # 강제해서 브라우저/OS 자체 캐시가 그만큼 기억하게 만든다.
+                # 응답은 MODULE_EVENT_MODDONE 에서 다 만들어진 뒤에만 손댈 수
+                # 있어 qdata 로 들고 넘긴다.
+                try:
+                    qdata['force_ttl'] = int(float(recent_bridge))
+                except (TypeError, ValueError):
+                    pass
+
+                qstate.ext_state[id] = MODULE_WAIT_MODULE
+                return True
         except Exception as e:
             log_info(f"⚠️ Redis Whitelist Check Error: {e}")
 
@@ -294,7 +313,8 @@ def operate(id, event, qstate, qdata):
             if qstate.return_msg and qstate.return_msg.rep:
                 qstate.return_msg.rep.security = 2  # 2 = sec_status_insecure
                 qstate.return_msg.rep.authoritative = 1 # 이 서버가 최종 권한자임을 명시
-            
+                qstate.return_msg.rep.ttl = 0
+
             qstate.return_rcode = RCODE_NXDOMAIN
             qstate.ext_state[id] = MODULE_FINISHED
             return True
@@ -321,11 +341,24 @@ def operate(id, event, qstate, qdata):
                     status = "nxdomain"
                 elif qstate.return_rcode != RCODE_NOERROR:
                     status = "error"
-                
+
                 DNS_UPSTREAM_RESOLVE_TOTAL.labels(status=status).inc()
-                
+
         except Exception as e:
             log_info(f"MODDONE LOGGING ERROR: {e}")
+
+        # allow_recent 다리를 타고 통과한 질의는, 실제 상위 응답이 이제 막
+        # 도착한 시점이다. 여기서 TTL 을 요청받은 값으로 덮어써야 클라이언트
+        # 캐시가 그만큼만(또는 그만큼) 기억한다 - 실제 도메인의 원래 TTL은
+        # 우리가 통제하는 값이 아니라서, 이 시점 전에는 손댈 수 없었다.
+        force_ttl = qdata.get('force_ttl')
+        if force_ttl is not None:
+            try:
+                if qstate.return_msg and qstate.return_msg.rep:
+                    qstate.return_msg.rep.ttl = force_ttl
+                    log_info(f"⏱️ [FORCE TTL] {force_ttl}s 로 캐시 수명 강제")
+            except Exception as e:
+                log_info(f"⚠️ TTL 강제 실패: {e}")
 
         qstate.ext_state[id] = MODULE_FINISHED
         return True
