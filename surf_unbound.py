@@ -338,7 +338,19 @@ def operate(id, event, qstate, qdata):
                 qstate.return_msg.rep.authoritative = 1 # 이 서버가 최종 권한자임을 명시
                 qstate.return_msg.rep.ttl = 0  # Unbound 자체 캐시용으로도 맞춰둔다
 
-            qstate.return_rcode = RCODE_NXDOMAIN
+                # qstate.return_rcode 를 RCODE_NXDOMAIN 으로 주면 Unbound가
+                # 오류 인코딩 경로를 타면서 AUTHORITY 섹션(=우리가 넣은 SOA)을
+                # 통째로 버린다 - 모듈 안에서는 끝까지 멀쩡히 들고 있다가 실제
+                # 와이어 패킷을 만드는 단계에서만 사라져서, 에러도 안 나고
+                # set_return_msg 도 성공을 반환하니 찾기 어려웠다.
+                #
+                # RCODE는 원래 DNS 헤더 플래그의 하위 4비트다. 그 자리에
+                # 직접 심고 return_rcode 는 NOERROR 로 둬서 정상 인코딩
+                # 경로를 타게 하면, 클라이언트는 플래그에 찍힌 그대로
+                # NXDOMAIN 을 보되 AUTHORITY(SOA)도 같이 받는다.
+                qstate.return_msg.rep.flags |= RCODE_NXDOMAIN
+
+            qstate.return_rcode = RCODE_NOERROR
             qstate.ext_state[id] = MODULE_FINISHED
             return True
 
