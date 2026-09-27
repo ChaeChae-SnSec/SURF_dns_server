@@ -235,12 +235,14 @@ def operate(id, event, qstate, qdata):
                 log_info(f"🟡 [RECENT ALLOW BRIDGE]: {qname}")
                 DNS_QUERIES.labels(client_ip=client_ip, qtype=qtype_str, result="whitelist").inc()
 
-                # 이 값은 "허용" 버튼이 정한 요청 지속시간(초)이다 (0=일회성,
-                # 1800=30분 등). 53 직결 환경에서는 기기별 상태를 서버에
-                # 남겨둘 방법이 없으니, 대신 실제 DNS 응답의 TTL을 그 값으로
-                # 강제해서 브라우저/OS 자체 캐시가 그만큼 기억하게 만든다.
-                # 응답은 MODULE_EVENT_MODDONE 에서 다 만들어진 뒤에만 손댈 수
-                # 있어 qdata 로 들고 넘긴다.
+                # 지금은 항상 0("이번 접속만")이다. 응답은 MODULE_EVENT_MODDONE
+                # 에서 다 만들어진 뒤에만 손댈 수 있어 qdata 로 들고 넘긴다.
+                # (참고: 이 경로로 실제 응답의 TTL을 늘려 오래 지속시키는 건
+                # 시도했으나 반영이 안 됐다 - rep.ttl 은 Unbound 자체 캐시용
+                # 필드일 뿐, 실제 상위 응답에서 이미 정해진 개별 레코드 TTL을
+                # 덮어쓰진 못하는 것으로 보인다. 차단 응답처럼 우리가 직접
+                # 만드는 경우엔 default_ttl 로 되지만, 여긴 실제 상위 응답을
+                # 그대로 쓰는 경로라 다르다.)
                 try:
                     qdata['force_ttl'] = int(float(recent_bridge))
                 except (TypeError, ValueError):
@@ -304,16 +306,24 @@ def operate(id, event, qstate, qdata):
             log_info(f"🚨 [SURF BLOCKED] {qname}")
             
             msg = DNSMessage(full_qname, RR_TYPE_A, RR_CLASS_IN, PKT_QR | PKT_AA | PKT_RA)
-            
+
+            # set_return_msg() 가 이 시점의 default_ttl 을 그대로 굳혀서 rep 를
+            # 만든다. rep.ttl 은 그 뒤에 고쳐봐야 이미 구워진 응답에 뒤늦게
+            # 손대는 거라 클라이언트한테 실제로 나가는 값엔 반영되지 않는다.
+            # "허용"을 눌러도 크롬이 이전 실패를 계속 캐싱해서 재조회 자체가
+            # 오지 않던 문제가 여기서 비롯됐다 - 반드시 set_return_msg 호출
+            # 전에 지정해야 한다.
+            msg.default_ttl = 0
+
             if not msg.set_return_msg(qstate):
                 log_info("❌ Failed to set return message")
                 qstate.ext_state[id] = MODULE_ERROR
                 return True
-            
+
             if qstate.return_msg and qstate.return_msg.rep:
                 qstate.return_msg.rep.security = 2  # 2 = sec_status_insecure
                 qstate.return_msg.rep.authoritative = 1 # 이 서버가 최종 권한자임을 명시
-                qstate.return_msg.rep.ttl = 0
+                qstate.return_msg.rep.ttl = 0  # Unbound 자체 캐시용으로도 맞춰둔다
 
             qstate.return_rcode = RCODE_NXDOMAIN
             qstate.ext_state[id] = MODULE_FINISHED
