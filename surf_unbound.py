@@ -310,10 +310,23 @@ def operate(id, event, qstate, qdata):
             # set_return_msg() 가 이 시점의 default_ttl 을 그대로 굳혀서 rep 를
             # 만든다. rep.ttl 은 그 뒤에 고쳐봐야 이미 구워진 응답에 뒤늦게
             # 손대는 거라 클라이언트한테 실제로 나가는 값엔 반영되지 않는다.
-            # "허용"을 눌러도 크롬이 이전 실패를 계속 캐싱해서 재조회 자체가
-            # 오지 않던 문제가 여기서 비롯됐다 - 반드시 set_return_msg 호출
-            # 전에 지정해야 한다.
+            # 반드시 set_return_msg 호출 전에 지정해야 한다.
             msg.default_ttl = 0
+
+            # 근데 default_ttl 만으로는 부족하다. RFC 2308 에 따르면 NXDOMAIN의
+            # negative-cache 수명은 AUTHORITY 섹션의 SOA MINIMUM 필드로
+            # 정해지는데, 이게 없으면(지금까지 이랬음) 클라이언트가 SOA 없는
+            # 응답을 자기 마음대로(대개 꽤 길게) 캐싱해버린다. "허용"을 눌러도
+            # 재조회가 Unbound 까지 안 오던 진짜 원인이 이거였다.
+            #
+            # pfBlockerNG(같은 방식으로 Unbound 파이썬 모듈로 DNS 차단하는
+            # 오픈소스 프로젝트)의 실제 구현을 참고했다. MNAME/RNAME은 실제
+            # 도메인을 흉내 낼 필요 없이 RFC 2606 예약 도메인(.invalid)을
+            # 쓰면 된다. 마지막 필드(MINIMUM)가 곧 negative-cache 수명이라
+            # 0으로 박아서 이 실패를 거의 기억 못 하게 만든다.
+            msg.authority.append(
+                f"{full_qname} 0 IN SOA surf.invalid. nobody.invalid. 1 3600 1200 604800 0"
+            )
 
             if not msg.set_return_msg(qstate):
                 log_info("❌ Failed to set return message")
